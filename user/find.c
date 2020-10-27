@@ -62,6 +62,7 @@ dfs(char* path, char* pattern)
   if(fstat(fd, &st) < 0)
   {
     close(fd);
+    return;
   }
 
   if(match(pattern, path))

@@ -3,7 +3,7 @@
 #include "user/user.h"
 #include "kernel/param.h"
 
-#define XARG_PARAM_MAX_LENGTH 16
+#define XARG_PARAM_MAX_LENGTH 128
 
 int
 main(int argc, char* argv[])
@@ -37,53 +37,57 @@ main(int argc, char* argv[])
       while(1)
       {
         char c;
-        // int n;
-
         int readRes = read(0, &c, sizeof(char));
+        if(readRes == 0) exit(); // exit on EOF?
         
-        if(readRes == 0)
-        {
-          exit();
-        }
-        
-        if(c == ' ')
+        if(c == ' ')  // split input.
         {
           i++;
           p = (char*)malloc(sizeof(char) * XARG_PARAM_MAX_LENGTH);
           buf[i] = p;
+          
+          if(i == MAXARG)
+          {
+            printf("Error: too many arguments.\n");
+            exit();
+          }
         }
         else if(c == '\n')
         {
-          int p = fork();
+          int childPid = fork();
 
-          if(p < 0)
+          if(childPid < 0)
           {
-            printf("Eror: fork error");
+            printf("Eror: fork error\n");
           }
-          else if (p == 0)
+          else if (childPid == 0)
           {
             exec(argv[1], buf);
             exit();
           }
-          else
-          {
-            wait();
-          }
+
+          wait();
           break;
         }
         else if(c == '\0')
         {
-          exit();
+          exit(); // Exit on EOF?
         }
         else
         {
           *p = c;
           p++;
+          if((p - buf[i]) >= XARG_PARAM_MAX_LENGTH)
+          {
+            printf("Error: Argmuent too long\n");
+            exit();
+          }
         }
       }
     }
   }
 
+  // clean up and die
   for(int i = 0; i < MAXARG; i++)
   {
     if(buf[i])
