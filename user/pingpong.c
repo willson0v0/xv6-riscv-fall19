@@ -28,6 +28,9 @@ main(int argc, char *argv[])
     read(parent2child[0], buffer, 5);
     printf("%d: received %s\n", getpid(), buffer);
     write(child2parent[1], pingpong[1], strlen(pingpong[1]) + 1);
+
+    close(parent2child[0]);
+    close(child2parent[1]);
   }
   else 
   {
@@ -37,6 +40,9 @@ main(int argc, char *argv[])
     write(parent2child[1], pingpong[0], strlen(pingpong[0]) + 1);
     read(child2parent[0], buffer, 5);
     printf("%d: received %s\n", getpid(), buffer);
+
+    close(parent2child[1]);
+    close(child2parent[0]);
   }
   exit();
 }
