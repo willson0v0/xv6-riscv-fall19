@@ -37,22 +37,7 @@ main(int argc, char *argv[])
     { 
       int p = fork();
 
-      if(p < 0)
-      {
-        printf("Error: fork error");
-        break;
-      }
-      else if(p == 0) // child process
-      {
-        // clean up. frontPipe[1] was already closed before fork()
-        close(frontPipe[0]);
-        // back pipe is front pipe for child process now.
-        frontPipe[0] = backPipe[0];
-        frontPipe[1] = backPipe[1];
-        // go looping: fork() and you are the parent now!
-        continue;
-      }
-      else  // parent process, all works are done here
+      if(p > 0) // parent
       {
         // clean up: won't read from backPipe and won't write to frontPipe
         close(backPipe[0]);
@@ -73,6 +58,21 @@ main(int argc, char *argv[])
         }
         // write complete, clean up and die
         close(backPipe[1]);
+        break;
+      }
+      else if(p == 0) // child process
+      {
+        // clean up. frontPipe[1] was already closed before fork()
+        close(frontPipe[0]);
+        // back pipe is front pipe for child process now.
+        frontPipe[0] = backPipe[0];
+        frontPipe[1] = backPipe[1];
+        // go looping: fork() and you are the parent now!
+        continue;
+      }
+      else  // fork error
+      {
+        printf("Error: fork error");
         break;
       }
     }
