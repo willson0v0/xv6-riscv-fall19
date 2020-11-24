@@ -207,3 +207,10 @@ void lst_push(struct list*, void *);
 void *lst_pop(struct list*);
 void lst_print(struct list*);
 int lst_empty(struct list*);
+
+
+
+
+void vmprint(pagetable_t);
+void vmprint_r(pagetable_t pagetable, int depth);
+int isGuardPage(pagetable_t pagetable, uint64 va);

@@ -67,7 +67,27 @@ usertrap(void)
     syscall();
   } else if((which_dev = devintr()) != 0){
     // ok
-  } else {
+  } else if(r_scause() == 15 || r_scause() == 13){
+    // printf("usertrap(): lazy allocation triggered for page fault @ stval = %p, page %p\n", r_stval(), PGROUNDDOWN(r_stval()));
+    if(r_stval() > p->sz)
+    {
+      p->killed = 1;
+    } else if(isGuardPage(p->pagetable, r_stval())) {
+      p->killed = 1;
+    }
+    else 
+    {
+      char* mem = kalloc();         // malloc new page
+      if(mem == 0) p->killed = 1;   // failed to grow size, just die
+      else {
+        memset(mem, 0, PGSIZE);
+        if(mappages(p->pagetable, PGROUNDDOWN(r_stval()), PGSIZE, (uint64)mem, PTE_W|PTE_X|PTE_R|PTE_U) != 0) {
+          kfree(mem);
+          p->killed = 1;
+        }
+      }
+    }
+  }else {
     printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);
     printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
     p->killed = 1;

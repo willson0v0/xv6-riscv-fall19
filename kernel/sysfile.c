@@ -472,6 +472,26 @@ sys_pipe(void)
     fileclose(wf);
     return -1;
   }
+
+  uint64 a = fdarray;
+  while(PGROUNDDOWN(a) < fdarray + sizeof(int))
+  {
+    if(a > p->sz) return -1;
+    if(walkaddr(p->pagetable, a) == 0)
+    {
+      char* mem = kalloc();
+      if(mem == 0) return -1;
+      else {
+        memset(mem, 0, PGSIZE);
+        if(mappages(p->pagetable, PGROUNDDOWN(a), PGSIZE, (uint64)mem, PTE_W|PTE_X|PTE_R|PTE_U) != 0) {
+          kfree(mem);
+          return -1;
+        }
+      }
+    }
+    a += PGSIZE;
+  }
+
   if(copyout(p->pagetable, fdarray, (char*)&fd0, sizeof(fd0)) < 0 ||
      copyout(p->pagetable, fdarray+sizeof(fd0), (char *)&fd1, sizeof(fd1)) < 0){
     p->ofile[fd0] = 0;

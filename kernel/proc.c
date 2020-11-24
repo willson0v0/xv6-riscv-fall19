@@ -631,6 +631,24 @@ either_copyout(int user_dst, uint64 dst, void *src, uint64 len)
 {
   struct proc *p = myproc();
   if(user_dst){
+    uint64 a = dst;
+    while(PGROUNDDOWN(a) < dst + len)
+    {
+      if(a > p->sz) return -1;
+      if(walkaddr(p->pagetable, a) == 0)
+      {
+        char* mem = kalloc();
+        if(mem == 0) return -1;
+        else {
+          memset(mem, 0, PGSIZE);
+          if(mappages(p->pagetable, PGROUNDDOWN(a), PGSIZE, (uint64)mem, PTE_W|PTE_X|PTE_R|PTE_U) != 0) {
+            kfree(mem);
+            return -1;
+          }
+        }
+      }
+      a += PGSIZE;
+    }
     return copyout(p->pagetable, dst, src, len);
   } else {
     memmove((char *)dst, src, len);
@@ -646,6 +664,25 @@ either_copyin(void *dst, int user_src, uint64 src, uint64 len)
 {
   struct proc *p = myproc();
   if(user_src){
+    // printf("copyin: usr %p to kernel %p, len %p\n", src, dst, len);
+    uint64 a = src;
+    while(PGROUNDDOWN(a) < src + len)
+    {
+      if(a > p->sz) return -1;
+      if(walkaddr(p->pagetable, a) == 0)
+      {
+        char* mem = kalloc();
+        if(mem == 0) return -1;
+        else {
+          memset(mem, 0, PGSIZE);
+          if(mappages(p->pagetable, PGROUNDDOWN(a), PGSIZE, (uint64)mem, PTE_W|PTE_X|PTE_R|PTE_U) != 0) {
+            kfree(mem);
+            return -1;
+          }
+        }
+      }
+      a += PGSIZE;
+    }
     return copyin(p->pagetable, dst, src, len);
   } else {
     memmove(dst, (char*)src, len);
