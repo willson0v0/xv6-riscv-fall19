@@ -9,6 +9,8 @@
 #include "riscv.h"
 #include "defs.h"
 
+#define PGCNT (0x8000000 / PGSIZE)
+
 void freerange(void *pa_start, void *pa_end);
 
 extern char end[]; // first address after kernel.
@@ -21,7 +23,37 @@ struct run {
 struct {
   struct spinlock lock;
   struct run *freelist;
+  unsigned char refCount[PGCNT];
 } kmem;
+
+int
+getPGPos(void* pa)
+{
+  if(pa < (void*)0x8000000 || (uint64)pa >= PHYSTOP)
+  {
+    printf("\ngetting pg pos for pa @ %p, when start = %p and phystop @ %p\n", pa, 0x8000000, PHYSTOP);
+    panic("getPGPos");
+  }
+  return ((char *)pa - end) / PGSIZE;
+}
+
+void
+refInc(void* pa)
+{
+  kmem.refCount[getPGPos(pa)]++;
+}
+
+void
+refDec(void* pa)
+{
+  kmem.refCount[getPGPos(pa)]--;
+}
+
+unsigned char
+getRef(void* pa)
+{
+  return kmem.refCount[getPGPos(pa)];
+}
 
 void
 kinit()
@@ -36,7 +68,10 @@ freerange(void *pa_start, void *pa_end)
   char *p;
   p = (char*)PGROUNDUP((uint64)pa_start);
   for(; p + PGSIZE <= (char*)pa_end; p += PGSIZE)
+  {
     kfree(p);
+    kmem.refCount[getPGPos(p)] = 0;
+  }
 }
 
 // Free the page of physical memory pointed at by v,
@@ -51,6 +86,14 @@ kfree(void *pa)
   if(((uint64)pa % PGSIZE) != 0 || (char*)pa < end || (uint64)pa >= PHYSTOP)
     panic("kfree");
 
+  if(getRef(pa) > 1) 
+  {
+    acquire(&kmem.lock);
+    refDec(pa);
+    release(&kmem.lock);
+    return;
+  }
+
   // Fill with junk to catch dangling refs.
   memset(pa, 1, PGSIZE);
 
@@ -59,6 +102,7 @@ kfree(void *pa)
   acquire(&kmem.lock);
   r->next = kmem.freelist;
   kmem.freelist = r;
+  kmem.refCount[getPGPos(r)] = 0;
   release(&kmem.lock);
 }
 
@@ -73,7 +117,10 @@ kalloc(void)
   acquire(&kmem.lock);
   r = kmem.freelist;
   if(r)
+  {
     kmem.freelist = r->next;
+    refInc(r);
+  }
   release(&kmem.lock);
 
   if(r)

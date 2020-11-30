@@ -16,6 +16,26 @@ void kernelvec();
 
 extern int devintr();
 
+pte_t *
+my_walk(pagetable_t pagetable, uint64 va, int alloc)
+{
+  if(va >= MAXVA)
+    return 0;
+
+  for(int level = 2; level > 0; level--) {
+    pte_t *pte = &pagetable[PX(level, va)];
+    if(*pte & PTE_V) {
+      pagetable = (pagetable_t)PTE2PA(*pte);
+    } else {
+      if(!alloc || (pagetable = (pde_t*)kalloc()) == 0)
+        return 0;
+      memset(pagetable, 0, PGSIZE);
+      *pte = PA2PTE(pagetable) | PTE_V;
+    }
+  }
+  return &pagetable[PX(0, va)];
+}
+
 void
 trapinit(void)
 {
@@ -49,6 +69,7 @@ usertrap(void)
   
   // save user program counter.
   p->tf->epc = r_sepc();
+  pte_t *e_pte = my_walk(p->pagetable, r_stval(), 0);
   
   if(r_scause() == 8){
     // system call
@@ -67,6 +88,42 @@ usertrap(void)
     syscall();
   } else if((which_dev = devintr()) != 0){
     // ok
+  } else if (r_scause() == 15) {
+    // recognize cow
+    if((e_pte != 0) && (*e_pte & PTE_COW) && !(*e_pte & PTE_W))
+    {
+      // printf("A cow event happened on addr %p.\n========== b4 modify ==========\n", r_stval());
+      // vmprint(p->pagetable);
+      if(getRef((char*)PTE2PA(*e_pte)) == 1)  // last ref, no kalloc(), just use it.
+      {
+        *e_pte &= ~PTE_COW;
+        *e_pte |= PTE_W;
+      }
+      else
+      {
+        refDec((char*)PTE2PA(*e_pte));
+        char* mem = kalloc();
+        if(mem == 0) p->killed = 1;
+        else
+        {
+          memmove(mem, (char*)PTE2PA(*e_pte), PGSIZE);
+          *e_pte = PA2PTE(mem) | PTE_FLAGS(*e_pte);
+          *e_pte &= ~PTE_COW;
+          *e_pte |= PTE_W;
+        }
+      }
+      // printf("========== aft modify ==========\n\n");
+      // vmprint(p->pagetable);
+      // printf("================================\n\n");
+    }
+    else
+    {
+      printf("Not a cow. pte %p, cow %d, w %d, u %d, v %d, ref cnt %d, vir %p => phy %p\n", *e_pte, (*e_pte & PTE_COW), (*e_pte & PTE_W), (*e_pte & PTE_U), (*e_pte & PTE_V), getRef((char*)PTE2PA(*e_pte)), r_stval(), PTE2PA(*e_pte));
+      vmprint(p->pagetable);
+      printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);
+      printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
+      p->killed = 1;
+    }
   } else {
     printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);
     printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
