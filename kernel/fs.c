@@ -401,6 +401,70 @@ bmap(struct inode *ip, uint bn)
     brelse(bp);
     return addr;
   }
+  bn -= NINDIRECT;
+
+  if(bn < NININDIRECT)
+  {
+    // read inindirect map table
+    uint inindirect_addr = ip->addrs[NIDBLK];
+    if(inindirect_addr == 0)   // inindirect not allocated
+    {
+      ip->addrs[NIDBLK] = balloc(ip->dev);
+      inindirect_addr = ip->addrs[NIDBLK];
+    }
+    struct buf* inindirect_buf = bread(ip->dev, inindirect_addr);
+    uint* indirect_addrs = (uint*)(inindirect_buf->data);   // get inindirect map table
+
+    // read indirect map table
+    uint indirect_addr = indirect_addrs[bn / NINDIRECT];
+    if(indirect_addr == 0)  // indirect not allocated
+    {
+      indirect_addrs[bn / NINDIRECT] = balloc(ip->dev);
+      indirect_addr = indirect_addrs[bn / NINDIRECT];
+      log_write(inindirect_buf);  // log back newly allocated indirect map table
+    }
+    struct buf* indirect_buf = bread(ip->dev, indirect_addr);
+    uint* addrs = (uint*)(indirect_buf->data);
+
+    // read addr
+    addr = addrs[bn % NINDIRECT];
+    if(addr == 0)   // not allocated, allocate new page
+    {
+      addrs[bn % NINDIRECT] = balloc(ip->dev);
+      addr = addrs[bn % NINDIRECT];
+      log_write(indirect_buf);
+    }
+
+    brelse(inindirect_buf);
+    brelse(indirect_buf);
+    return addr;
+
+    // // load in-in-direct block
+    // if((addr = ip->addrs[NIDBLK]) == 0)
+    //   ip->addrs[NDIRECT] = addr = balloc(ip->dev);
+    
+    // bp = bread(ip->dev, addr);
+    // a = (uint*)bp->data;
+
+    // // load indirect block
+    // if((addr = a[bn / NINDIRECT]) == 0) {
+    //   a[bn / NINDIRECT] = addr = balloc(ip->dev);
+    //   log_write(bp);
+    // }
+    
+    // brelse(bp);
+    
+    // bp = bread(ip->dev, addr);
+    // a = (uint*)bp->data;
+
+    // if((addr = a[bn % NINDIRECT]) == 0){
+    //   a[bn % NINDIRECT] = addr = balloc(ip->dev);
+    //   log_write(bp);
+    // }
+
+    // brelse(bp);
+    // return addr;
+  }
 
   panic("bmap: out of range");
 }
