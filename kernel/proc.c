@@ -123,6 +123,9 @@ found:
   p->context.ra = (uint64)forkret;
   p->context.sp = p->kstack + PGSIZE;
 
+  for(int i = 0; i < MAX_VMA; i++)
+    p->vmas[i].valid = 0;
+
   return p;
 }
 

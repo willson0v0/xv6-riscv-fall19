@@ -1,3 +1,16 @@
+#define MAX_VMA 16
+
+struct VMA 
+{
+  int valid;
+  void* addr;
+  int length;
+  int prot;
+  int flags;
+  int fd;
+  struct file* f;
+};
+
 // Saved registers for kernel context switches.
 struct context {
   uint64 ra;
@@ -103,4 +116,6 @@ struct proc {
   struct file *ofile[NOFILE];  // Open files
   struct inode *cwd;           // Current directory
   char name[16];               // Process name (debugging)
+
+  struct VMA vmas[MAX_VMA];
 };

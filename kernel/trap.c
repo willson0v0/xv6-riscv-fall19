@@ -5,6 +5,10 @@
 #include "spinlock.h"
 #include "proc.h"
 #include "defs.h"
+#include "mmap.h"
+#include "sleeplock.h"
+#include "fs.h"
+#include "file.h"
 
 struct spinlock tickslock;
 uint ticks;
@@ -70,6 +74,52 @@ usertrap(void)
     syscall();
   } else if((which_dev = devintr()) != 0){
     // ok
+  } else if(r_scause() == 13 || r_scause() == 15) { // 13: pf by read, 15: pf by write
+    // page fault. check if is inside a mmap region?
+    struct VMA * vma;
+    for(vma = p->vmas; vma < p->vmas + MAX_VMA; vma++)
+    {
+      if(vma->valid && r_stval() >= (uint64)vma->addr && ((r_stval() - (uint64)(vma->addr)) < (vma->length)))  // indeed
+      {
+        break;
+      }
+    }
+
+    if(vma == p->vmas + MAX_VMA)
+    {
+      printf("usertrap(): unexpected page fault scause %p (%s) pid=%d\n", r_scause(), scause_desc(r_scause()), p->pid);
+      printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
+      p->killed = 1;
+    }
+    else if(r_scause() == 13 && !(vma->prot & PROT_READ))
+    {
+      printf("usertrap(): attempting to read from a non PORT_READ VMA page. scause %p (%s) pid=%d\n", r_scause(), scause_desc(r_scause()), p->pid);
+      printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
+      p->killed = 1;
+    }
+    else if(r_scause() == 15 && !(vma->prot & PROT_WRITE))
+    {
+      printf("usertrap(): attempting to write to a non PORT_WRITE VMA page. scause %p (%s) pid=%d\n", r_scause(), scause_desc(r_scause()), p->pid);
+      printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
+      p->killed = 1;
+    }
+    else    // cool. alloc page, read file and copy into it.
+    {
+      printf("lazy triggered for %p.", r_stval());
+      char* mem = kalloc();
+      if(mem == 0) p->killed = 1;
+      else
+      {
+        printf(" Copying from offset %p\n", PGROUNDDOWN(r_stval()) - (uint64)vma->addr);
+        acquiresleep(&(vma->f->ip->lock));
+        readi(vma->f->ip, 0, (uint64)mem, PGROUNDDOWN(r_stval()) - (uint64)vma->addr, PGSIZE);
+        releasesleep(&(vma->f->ip->lock));
+        if(mappages(p->pagetable, PGROUNDDOWN(r_stval()), PGSIZE, (uint64)mem, PTE_W|PTE_X|PTE_R|PTE_U) != 0) {
+          kfree(mem);
+          p->killed = 1;
+        }
+      }
+    }
   } else {
     printf("usertrap(): unexpected scause %p (%s) pid=%d\n", r_scause(), scause_desc(r_scause()), p->pid);
     printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
