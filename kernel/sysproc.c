@@ -6,6 +6,10 @@
 #include "memlayout.h"
 #include "spinlock.h"
 #include "proc.h"
+#include "sleeplock.h"
+#include "fs.h"
+#include "file.h"
+#include "mmap.h"
 
 // Fetch the nth word-sized system call argument as a file descriptor
 // and return both the descriptor and the corresponding struct file.
@@ -174,9 +178,10 @@ sys_mmap(void)
   if(argfd(4, &fd, &f) < 0) return -1;
   if(argint(5, &offset) < 0) return -1;
 
-  // 0. assert not implemented features
+  // 0. assert not implemented features & check permission
   if(addr_discard != 0) panic("mmap addr");
   if(offset != 0) panic("mmap offset");
+  if(!f->writable && (prot & PROT_WRITE) && (flags & MAP_SHARED)) return -1;
 
   // 1. allocate vma
   struct VMA* vma;
@@ -188,7 +193,28 @@ sys_mmap(void)
 
   // 2. alloc from MAXVA
   // |     sz|           |existing vmas|  |MAXVA
-  vma->addr = try_fit((void*)MAXVA - length, length, myproc());
+  vma->addr = (void*)(TRAPFRAME - PGSIZE - length);
+  while(1)
+  {
+    int fail_flag = 0;
+    struct VMA* vma2;
+    for(vma2 = myproc()->vmas; vma2 < myproc()->vmas + MAX_VMA && !fail_flag; vma2++)
+    {
+      if(vma2->valid)
+      {
+        if(vma->addr >= vma2->addr && vma->addr <= vma2->addr+vma2->length)
+        {
+          fail_flag = 1;
+        }
+        if(vma->addr + length >= vma2->addr && vma->addr + length <= vma2->addr+vma2->length)
+        {
+          fail_flag = 1;
+        }
+      }
+    }
+    if(fail_flag) vma->addr -= PGSIZE;
+    else break;
+  }
   if((uint64)vma->addr < myproc()->sz)
   {
     vma->valid = 0;
@@ -204,7 +230,6 @@ sys_mmap(void)
   vma->f = f;
   filedup(f);
 
-  printf("mmap fin @ pos %p, len %p\n", vma->addr, vma->length);
   return (uint64)vma->addr;
 }
 
@@ -212,5 +237,43 @@ sys_mmap(void)
 uint64
 sys_munmap(void)
 {
+  char* addr;
+  int length;
+  if(argaddr(0, (uint64*)&addr) < 0) return -1;
+  if(argint(1, &length) < 0) return -1;
+
+  // as told, test will only unmap head / tail, but not punch a hole
+  
+  // 1. find vma
+  struct VMA* vma;
+  for(vma = myproc()->vmas; vma < myproc()->vmas + MAX_VMA; vma++)
+  {
+    if(vma->valid && (char*)vma->addr <= addr && (char*)vma->addr + vma->length >= addr + length) break;
+  }
+  if(vma == myproc()->vmas + MAX_VMA) return -1;
+
+  // 2. handle wb
+  if(vma->flags & MAP_SHARED) // write back
+    filewrite(vma->f, (uint64)addr, length);
+
+  // 3. unmap user memory region. do free.
+  uvmunmap(myproc()->pagetable, (uint64)addr, (uint64)length, 1);
+
+  // 2. if is whole, remove vma; or shrink it instead.
+  if(vma->addr == addr && vma->length == length)
+  {
+    fileclose(vma->f);
+    vma->valid = 0;
+  }
+  else if(vma->addr == addr) // head;
+  {
+    vma->addr += length;
+  }
+  else  // tail
+  {
+    vma->length -= length;
+  }
+
+
   return 0;
 }

@@ -8,6 +8,7 @@
 #include "file.h"
 #include "proc.h"
 #include "defs.h"
+#include "mmap.h"
 
 struct cpu cpus[NCPU];
 
@@ -286,6 +287,13 @@ fork(void)
 
   np->state = RUNNABLE;
 
+  for(int i = 0; i < MAX_VMA; i++)
+  {
+    np->vmas[i] = p->vmas[i];
+    if(np->vmas[i].valid)
+      filedup(np->vmas[i].f);
+  }
+
   release(&np->lock);
 
   return pid;
@@ -324,6 +332,23 @@ void
 exit(int status)
 {
   struct proc *p = myproc();
+
+  struct VMA* vma;
+
+  for(vma = myproc()->vmas; vma < myproc()->vmas + MAX_VMA; vma++)
+  {
+    if(vma->valid)
+    {
+      if(vma->flags & MAP_SHARED) // write back
+        filewrite(vma->f, (uint64)vma->addr, vma->length);
+
+      // unmap user memory region. do free.
+      uvmunmap(myproc()->pagetable, (uint64)vma->addr, (uint64)vma->length, 0);
+
+      fileclose(vma->f);
+      vma->valid = 0;
+    }
+  }
 
   if(p == initproc)
     panic("init exiting");

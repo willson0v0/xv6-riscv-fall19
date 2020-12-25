@@ -85,13 +85,13 @@ usertrap(void)
       }
     }
 
-    if(vma == p->vmas + MAX_VMA)
+    if(vma == p->vmas + MAX_VMA)  // normal page fault
     {
       printf("usertrap(): unexpected page fault scause %p (%s) pid=%d\n", r_scause(), scause_desc(r_scause()), p->pid);
       printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
       p->killed = 1;
     }
-    else if(r_scause() == 13 && !(vma->prot & PROT_READ))
+    else if(r_scause() == 13 && !(vma->prot & PROT_READ)) // mmap, but wrong permission
     {
       printf("usertrap(): attempting to read from a non PORT_READ VMA page. scause %p (%s) pid=%d\n", r_scause(), scause_desc(r_scause()), p->pid);
       printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
@@ -105,16 +105,18 @@ usertrap(void)
     }
     else    // cool. alloc page, read file and copy into it.
     {
-      printf("lazy triggered for %p.", r_stval());
-      char* mem = kalloc();
+      // printf("lazy triggered for va %p.", r_stval());
+      char* mem = kalloc(); // alloc page
+      memset(mem, 0, PGSIZE);
       if(mem == 0) p->killed = 1;
       else
       {
-        printf(" Copying from offset %p\n", PGROUNDDOWN(r_stval()) - (uint64)vma->addr);
+        // printf(" Copying %p bytes from offset %p\n", PGSIZE, PGROUNDDOWN(r_stval()) - (uint64)vma->addr);
         acquiresleep(&(vma->f->ip->lock));
-        readi(vma->f->ip, 0, (uint64)mem, PGROUNDDOWN(r_stval()) - (uint64)vma->addr, PGSIZE);
+        readi(vma->f->ip, 0, (uint64)mem, PGROUNDDOWN(r_stval()) - (uint64)vma->addr, PGSIZE);  // copy page to kernel mem
         releasesleep(&(vma->f->ip->lock));
-        if(mappages(p->pagetable, PGROUNDDOWN(r_stval()), PGSIZE, (uint64)mem, PTE_W|PTE_X|PTE_R|PTE_U) != 0) {
+        if(mappages(p->pagetable, PGROUNDDOWN(r_stval()), PGSIZE, (uint64)mem, PTE_W|PTE_X|PTE_R|PTE_U) != 0) {   // map kernel page to user space
+          // printf("mappages failed.");
           kfree(mem);
           p->killed = 1;
         }
